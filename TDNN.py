@@ -10,16 +10,19 @@ import math
 class TDNN(nn.Module):
     def __init__(self, context, input_dim, output_dim, full_context = True):
         """
-        Definition of context is the same as the way it's defined in the Peddinti paper. It's a list of integers.
+        Definition of context is the same as the way it's defined in the Peddinti paper. It's a list of integers, eg: [-2,2]
+        By deault, full context is chosen, which means: [-2,2] will be expanded to [-2,-1,0,1,2] i.e. range(-2,3)
         """
         super(TDNN,self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.kernel_width, self.context = self.get_kernel_width(context,full_context)
+        self.context = Variable(torch.LongTensor(self.context))
         self.full_context = full_context
         stdv = 1./math.sqrt(input_dim)
         self.kernel = nn.Parameter(torch.Tensor(output_dim, input_dim, self.kernel_width).normal_(0,stdv))
         self.bias = nn.Parameter(torch.Tensor(output_dim).normal_(0,stdv))
+        self.cuda_flag = False
 
     def forward(self,x):
         """
@@ -27,13 +30,18 @@ class TDNN(nn.Module):
         x.size(): [batch_size, sequence_length, input_dim]
         sequence length is the length of the input spectral data (number of frames) or if already passed through the convolutional network, it's the number of learned features
         """
-        context = Variable(torch.LongTensor(self.context))
-        conv_out = self.special_convolution(x, self.kernel, context, self.bias)
+        # Check if parameters are cuda type and change context
+        if type(self.bias.data) == torch.cuda.FloatTensor and self.cuda_flag == False:
+            self.context = self.context.cuda()
+            self.cuda_flag = True
+        conv_out = self.special_convolution(x, self.kernel, self.context, self.bias)
         return F.relu(conv_out)
 
-    @staticmethod
-    def special_convolution(x, kernel, context, bias):
-
+    def special_convolution(self, x, kernel, context, bias):
+        """
+        This function performs the weight multiplication given an arbitrary context. Cannot directly use convolution because in case of only particular frames of context,
+        one needs to select only those frames and perform a convolution across all batch items and all output dimensions of the kernel.
+        """
         input_size = x.size()
         assert len(input_size) == 3, 'Input tensor dimensionality is incorrect. Should be a 3D tensor'
         [batch_size, input_sequence_length, input_dim] = input_size
@@ -41,8 +49,12 @@ class TDNN(nn.Module):
 
         # Allocate memory for output
         valid_steps = range(-1*context.data[0], input_sequence_length - context.data[-1])
-        xs = Variable(torch.Tensor(batch_size, kernel.size()[0], len(valid_steps)))
+        if self.cuda_flag == True:
+            xs = Variable(torch.cuda.FloatTensor(batch_size, kernel.size()[0], len(valid_steps)))
+        else:
+            xs = Variable(torch.FloatTensor(batch_size, kernel.size()[0], len(valid_steps)))
 
+        # Perform the convolution with relevant input frames
         for c, i in enumerate(valid_steps):
             features = torch.index_select(x, 2, context+i)
             xs[:,:,c] = F.conv1d(features, kernel, bias = bias)[:,:,0]
