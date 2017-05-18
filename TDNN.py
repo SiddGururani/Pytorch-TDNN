@@ -16,14 +16,14 @@ class TDNN(nn.Module):
         super(TDNN,self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
-        self.kernel_width, self.context = self.get_kernel_width(context,full_context)
-        self.context = Variable(torch.LongTensor(self.context))
-        self.check_valid_context(self.context)
+        self.check_valid_context(context)
+        self.kernel_width, context = self.get_kernel_width(context,full_context)
+        self.register_buffer('context',Variable(torch.LongTensor(context)))
         self.full_context = full_context
         stdv = 1./math.sqrt(input_dim)
         self.kernel = nn.Parameter(torch.Tensor(output_dim, input_dim, self.kernel_width).normal_(0,stdv))
         self.bias = nn.Parameter(torch.Tensor(output_dim).normal_(0,stdv))
-        self.cuda_flag = False
+        # self.cuda_flag = False
 
     def forward(self,x):
         """
@@ -34,9 +34,9 @@ class TDNN(nn.Module):
         output size: [batch_size, output_dim, len(valid_steps)]
         """
         # Check if parameters are cuda type and change context
-        if type(self.bias.data) == torch.cuda.FloatTensor and self.cuda_flag == False:
-            self.context = self.context.cuda()
-            self.cuda_flag = True
+        # if type(self.bias.data) == torch.cuda.FloatTensor and self.cuda_flag == False:
+        #     self.context = self.context.cuda()
+        #     self.cuda_flag = True
         conv_out = self.special_convolution(x, self.kernel, self.context, self.bias)
         return F.relu(conv_out)
 
@@ -52,10 +52,7 @@ class TDNN(nn.Module):
 
         # Allocate memory for output
         valid_steps = self.get_valid_steps(self.context, input_sequence_length)
-        if self.cuda_flag == True:
-            xs = Variable(torch.cuda.FloatTensor(batch_size, kernel.size()[0], len(valid_steps)))
-        else:
-            xs = Variable(torch.FloatTensor(batch_size, kernel.size()[0], len(valid_steps)))
+        xs = Variable(self.bias.data.new(batch_size, kernel.size()[0], len(valid_steps)))
 
         # Perform the convolution with relevant input frames
         for c, i in enumerate(valid_steps):
@@ -65,7 +62,8 @@ class TDNN(nn.Module):
 
     @staticmethod
     def check_valid_context(context):
-        assert context.data[0] <= context.data[-1], 'Input tensor dimensionality is incorrect. Should be a 3D tensor'
+        # here context is still a list
+        assert context[0] <= context[-1], 'Input tensor dimensionality is incorrect. Should be a 3D tensor'
 
     @staticmethod
     def get_kernel_width(context, full_context):
