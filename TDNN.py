@@ -18,7 +18,7 @@ class TDNN(nn.Module):
         self.output_dim = output_dim
         self.check_valid_context(context)
         self.kernel_width, context = self.get_kernel_width(context,full_context)
-        self.register_buffer('context',Variable(torch.LongTensor(context)))
+        self.register_buffer('context',torch.LongTensor(context))
         self.full_context = full_context
         stdv = 1./math.sqrt(input_dim)
         self.kernel = nn.Parameter(torch.Tensor(output_dim, input_dim, self.kernel_width).normal_(0,stdv))
@@ -73,6 +73,6 @@ class TDNN(nn.Module):
 
     @staticmethod
     def get_valid_steps(context, input_sequence_length):
-        start = 0 if context.data[0] >= 0 else -1*context.data[0]
-        end = input_sequence_length if context.data[-1] <= 0 else input_sequence_length - context.data[-1]
+        start = 0 if context[0] >= 0 else -1*context[0]
+        end = input_sequence_length if context[-1] <= 0 else input_sequence_length - context[-1]
         return range(start, end)
